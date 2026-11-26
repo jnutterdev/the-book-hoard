@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { connection } from "next/server";
 import { checkHardcoverConnection, type HardcoverConnection } from "@/lib/hardcover/me";
 
@@ -45,7 +46,7 @@ function describe(connectionState: HardcoverConnection): CardContent {
 function CardShell({ headline, detail, art }: CardContent) {
     const image = ART[art];
     return (
-        <section className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6">
+        <Link href="/sync" className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6 transition hover:border-brand-accent">
             <div className="flex flex-col gap-2">
                 <h2 className="text-sm font-bold tracking-widest text-brand-muted uppercase">Hardcover</h2>
                 <p className="text-lg font-bold">{headline}</p>
@@ -59,7 +60,7 @@ function CardShell({ headline, detail, art }: CardContent) {
                 loading="eager"
                 className="h-auto w-16"
             />
-        </section>
+        </Link>
     );
 }
 

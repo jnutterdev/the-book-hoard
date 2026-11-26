@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { and, count, isNull } from "drizzle-orm";
@@ -53,7 +54,7 @@ export default function Home() {
                 </div>
             </header>
 
-            <section className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6">
+            <Link href="/library" className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6 transition hover:border-brand-accent">
                 <div className="flex flex-col gap-2">
                     <h2 className="text-sm font-bold tracking-widest text-brand-muted uppercase">
                         Your hoard
@@ -72,7 +73,7 @@ export default function Home() {
                     loading="eager"
                     className="h-auto w-16"
                 />
-            </section>
+            </Link>
 
             <Suspense fallback={<HardcoverCardFallback />}>
                 <HardcoverCard />
