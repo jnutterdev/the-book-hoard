@@ -65,6 +65,8 @@ export interface SortableRow {
     authors: string[];
     published: string | null;
     addedAt: string | null;
+    /** Full timestamp behind `addedAt`, so books added the same day keep their order. */
+    addedStamp?: string | null;
     rating: number | null;
 }
 
@@ -77,7 +79,7 @@ function valueFor(row: SortableRow, key: SortKey): string | number | null {
         case "published":
             return publishedYear(row.published);
         case "added":
-            return row.addedAt;
+            return row.addedAt ? `${row.addedAt} ${row.addedStamp ?? ""}` : null;
         case "rating":
             return row.rating;
     }
@@ -100,4 +102,15 @@ export function sortRows<T extends SortableRow>(rows: T[], key: SortKey, dir: So
             return primary !== 0 ? primary : compareValues(a.title, b.title);
         })
         .map(({ row }) => row);
+}
+
+/** A link to `path` that keeps `params` (the filter) and sets the sort, leaving the default out of the URL. */
+export function sortHref(path: string, params: Record<string, string>, sort: { key: SortKey; dir: SortDir }): string {
+    const query = new URLSearchParams(params);
+    if (sort.key !== DEFAULT_SORT.key || sort.dir !== DEFAULT_SORT.dir) {
+        query.set("sort", sort.key);
+        query.set("dir", sort.dir);
+    }
+    const text = query.toString();
+    return text ? `${path}?${text}` : path;
 }

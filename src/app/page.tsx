@@ -10,6 +10,8 @@ import {
     HardcoverCard,
     HardcoverCardFallback,
 } from "@/components/HardcoverCard";
+import { NewestBooks, NewestBooksFallback } from "@/components/home/NewestBooks";
+import { RecentLists } from "@/components/home/RecentLists";
 
 async function HoardCounts() {
     // better-sqlite3 is synchronous, so mark this as request-time work or Next bakes the counts in at build.
@@ -93,6 +95,14 @@ export default function Home() {
                     className="h-auto w-16"
                 />
             </Link>
+
+            <Suspense fallback={<NewestBooksFallback />}>
+                <NewestBooks />
+            </Suspense>
+
+            <Suspense fallback={null}>
+                <RecentLists />
+            </Suspense>
 
             <Suspense fallback={<HardcoverCardFallback />}>
                 <HardcoverCard />
