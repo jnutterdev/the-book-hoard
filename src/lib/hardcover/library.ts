@@ -58,6 +58,7 @@ export interface HcListBook {
 export interface HcList {
     id: number;
     name: string;
+    slug: string | null;
     description: string | null;
     ranked: boolean | null;
     privacy_setting_id: number | null;
@@ -115,6 +116,7 @@ const LISTS_PAGE_QUERY = /* GraphQL */ `
         lists(where: { user_id: { _eq: $userId } }, order_by: { id: asc }, limit: $limit, offset: $offset) {
             id
             name
+            slug
             description
             ranked
             privacy_setting_id

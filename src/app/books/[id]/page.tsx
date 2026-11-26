@@ -4,9 +4,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db/client";
-import { books, editions, externalIds, libraryEntries, listItems, lists, reads } from "@/db/schema";
+import { books, editions, externalIds, libraryEntries, listItems, lists, OWNED_LIST_SLUG, reads } from "@/db/schema";
+import { ownedListId } from "@/lib/list-membership";
 import { EntryControls, type StatusOption } from "@/components/book/EntryControls";
 import { ListMembership } from "@/components/book/ListMembership";
 import { hasPendingChanges } from "@/lib/outbox";
@@ -41,13 +42,21 @@ function loadBook(bookId: string) {
               .all()
         : [];
 
-    const allLists = db.select({ id: lists.id, name: lists.name }).from(lists).where(isNull(lists.deletedAt)).orderBy(asc(lists.name)).all();
+    // The Owned list is driven by the "I own a copy" switch, so it isn't offered here.
+    const allLists = db
+        .select({ id: lists.id, name: lists.name })
+        .from(lists)
+        .where(and(isNull(lists.deletedAt), or(isNull(lists.slug), ne(lists.slug, OWNED_LIST_SLUG))))
+        .orderBy(asc(lists.name))
+        .all();
     const memberships = db
         .select({ id: listItems.id, listId: listItems.listId })
         .from(listItems)
         .where(and(eq(listItems.bookId, bookId), isNull(listItems.deletedAt)))
         .all();
     const onLists = new Set(memberships.map((item) => item.listId));
+    const ownedId = ownedListId();
+    const owned = ownedId ? onLists.has(ownedId) : (entry?.owned ?? false);
 
     const hardcoverUrl = db
         .select({ url: externalIds.url })
@@ -70,6 +79,7 @@ function loadBook(bookId: string) {
         edition,
         readHistory,
         lists: allLists.map((list) => ({ ...list, onList: onLists.has(list.id) })),
+        owned,
         hardcoverUrl,
         unsynced,
     };
@@ -136,7 +146,7 @@ async function BookDetail({ params }: { params: Promise<{ id: string }> }) {
                             entryId={entry.id}
                             status={entry.status}
                             rating={entry.rating}
-                            owned={entry.owned}
+                            owned={data.owned}
                             hidden={entry.hiddenAt !== null}
                             statusOptions={STATUS_OPTIONS}
                         />

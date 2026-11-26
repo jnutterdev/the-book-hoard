@@ -120,9 +120,14 @@ export const reads = sqliteTable(
   (t) => [index("reads_entry_idx").on(t.libraryEntryId)],
 );
 
+/** Hardcover's system list that tracks owned editions. Its slug never changes. */
+export const OWNED_LIST_SLUG = "owned";
+
 export const lists = sqliteTable("lists", {
   id: id(),
   name: text("name").notNull(),
+  /** Hardcover's list slug, e.g. `owned` for the system Owned list. */
+  slug: text("slug"),
   description: text("description"),
   privacy: integer("privacy"),
   ranked: integer("ranked", { mode: "boolean" }).notNull().default(false),
@@ -271,3 +276,11 @@ export const importRows = sqliteTable(
   },
   (t) => [index("import_rows_import_idx").on(t.importId)],
 );
+
+/** Small key-value store for one-time jobs and app settings. */
+export const appMeta = sqliteTable("app_meta", {
+  id: id(),
+  key: text("key").notNull().unique(),
+  value: text("value"),
+  ...timestamps,
+});

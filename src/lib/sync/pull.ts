@@ -12,6 +12,7 @@ import {
     type HcList,
 } from "@/lib/hardcover/library";
 import { getMe } from "@/lib/hardcover/me";
+import { backfillOwnedList } from "@/lib/list-membership";
 import { log } from "@/lib/log";
 import {
     activeLinked,
@@ -180,6 +181,9 @@ async function pull({ trigger, confirmDeletions = false }: PullOptions): Promise
                 lists: listsToRemove.length,
             });
         }
+
+        step = "queueing owned books for the Owned list";
+        backfillOwnedList();
 
         finishRunOk(run.runId, stats, laterOf(run.cursor, newestUpdate));
         return { status: "ok", kind: run.kind, stats };

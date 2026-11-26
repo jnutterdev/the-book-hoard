@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import { and, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { books, libraryEntries, type ReadingStatus } from "@/db/schema";
+import { ownedBookIds, ownedListId } from "@/lib/list-membership";
 import { parseStatus, STATUS_INFO, STATUS_ORDER } from "@/lib/reading-status";
 
 export const metadata: Metadata = { title: "Library" };
@@ -118,6 +119,8 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
     const counts = loadStatusCounts();
     const hiddenCount = loadHiddenCount();
     const rows = loadLibrary(filter);
+    // Owned means "on Hardcover's Owned list" once that list has synced.
+    const ownedIds = ownedListId() ? ownedBookIds() : null;
 
     if (counts.size === 0 && hiddenCount === 0) {
         return (
@@ -184,7 +187,7 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                                     <Stars rating={row.rating} />
                                 </td>
                                 <td className="hidden px-4 py-3 text-brand-muted sm:table-cell">
-                                    {row.owned ? "Yes" : ""}
+                                    {(ownedIds ? ownedIds.has(row.bookId) : row.owned) ? "Yes" : ""}
                                 </td>
                                 <td className="hidden px-4 py-3 whitespace-nowrap text-brand-muted md:table-cell">
                                     {row.addedAt ?? ""}

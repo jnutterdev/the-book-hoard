@@ -1,9 +1,10 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { libraryEntries, listItems, lists, READING_STATUS, type ReadingStatus } from "@/db/schema";
+import { libraryEntries, lists, READING_STATUS, type ReadingStatus } from "@/db/schema";
+import { setListMembership, setOwnership } from "@/lib/list-membership";
 import { enqueue } from "@/lib/outbox";
 
 export type EditResult = { ok: true } | { ok: false; error: string };
@@ -45,10 +46,6 @@ export async function setRating(entryId: string, rating: number | null): Promise
     return updateEntry(entryId, { rating }, "rating");
 }
 
-export async function setOwned(entryId: string, owned: boolean): Promise<EditResult> {
-    return updateEntry(entryId, { owned: owned === true }, "owned");
-}
-
 /** Local only: never touches the outbox or Hardcover. */
 export async function setHidden(entryId: string, hidden: boolean): Promise<EditResult> {
     if (!activeEntry(entryId)) return fail("That book isn't in your library anymore.");
@@ -60,15 +57,16 @@ export async function setHidden(entryId: string, hidden: boolean): Promise<EditR
     return { ok: true };
 }
 
-function nextPosition(listId: string): string {
-    const last = db
-        .select({ position: listItems.position })
-        .from(listItems)
-        .where(and(eq(listItems.listId, listId), isNull(listItems.deletedAt)))
-        .orderBy(desc(listItems.position))
+export async function setOwned(entryId: string, owned: boolean): Promise<EditResult> {
+    const entry = db
+        .select({ id: libraryEntries.id, bookId: libraryEntries.bookId })
+        .from(libraryEntries)
+        .where(and(eq(libraryEntries.id, entryId), isNull(libraryEntries.deletedAt)))
         .get();
-    const next = last ? Number.parseInt(last.position, 10) + 1 : 0;
-    return String(Number.isFinite(next) ? next : 0).padStart(6, "0");
+    if (!entry) return fail("That book isn't in your library anymore.");
+    db.transaction((tx) => setOwnership(tx, entry.id, entry.bookId, owned === true));
+    refresh();
+    return { ok: true };
 }
 
 export async function setOnList(bookId: string, listId: string, onList: boolean): Promise<EditResult> {
@@ -78,38 +76,7 @@ export async function setOnList(bookId: string, listId: string, onList: boolean)
         .where(and(eq(lists.id, listId), isNull(lists.deletedAt)))
         .get();
     if (!list) return fail("That list doesn't exist anymore.");
-
-    // Newest first, so a re-add revives the most recent row and can cancel its pending removal.
-    const existing = db
-        .select({ id: listItems.id, deletedAt: listItems.deletedAt })
-        .from(listItems)
-        .where(and(eq(listItems.listId, listId), eq(listItems.bookId, bookId)))
-        .orderBy(desc(listItems.updatedAt))
-        .all();
-    const active = existing.find((item) => item.deletedAt === null);
-
-    if (onList && !active) {
-        const position = nextPosition(listId);
-        db.transaction((tx) => {
-            const revived = existing[0];
-            if (revived) {
-                tx.update(listItems).set({ deletedAt: null, position }).where(eq(listItems.id, revived.id)).run();
-                enqueue(tx, "list_item", revived.id, "create");
-            } else {
-                const id = crypto.randomUUID();
-                tx.insert(listItems).values({ id, listId, bookId, position }).run();
-                enqueue(tx, "list_item", id, "create");
-            }
-        });
-    }
-
-    if (!onList && active) {
-        db.transaction((tx) => {
-            tx.update(listItems).set({ deletedAt: new Date().toISOString() }).where(eq(listItems.id, active.id)).run();
-            enqueue(tx, "list_item", active.id, "delete");
-        });
-    }
-
+    db.transaction((tx) => setListMembership(tx, bookId, listId, onList === true));
     refresh();
     return { ok: true };
 }

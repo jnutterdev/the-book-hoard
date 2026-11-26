@@ -250,6 +250,7 @@ export function applyList(tx: Tx, remote: HcList): ListApplyResult {
 
     const values = {
         name: remote.name,
+        slug: remote.slug,
         description: remote.description,
         privacy: remote.privacy_setting_id,
         ranked: remote.ranked ?? false,
