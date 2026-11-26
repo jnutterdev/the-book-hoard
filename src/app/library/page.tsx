@@ -8,7 +8,7 @@ import { db } from "@/db/client";
 import { books, libraryEntries, listItems, type ReadingStatus } from "@/db/schema";
 import { ownedBookIds, ownedListId } from "@/lib/list-membership";
 import { parseStatus, STATUS_INFO, STATUS_ORDER } from "@/lib/reading-status";
-import { DEFAULT_SORT, parseSort, SORT_OPTIONS, sortRows, type SortDir, type SortKey } from "@/lib/library-sort";
+import { DEFAULT_SORT, parseSort, publishedYear, SORT_OPTIONS, sortRows, type SortDir, type SortKey } from "@/lib/library-sort";
 
 export const metadata: Metadata = { title: "Library" };
 
@@ -279,6 +279,7 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                             <th className="w-36 px-4 py-3 font-bold">Status</th>
                             <th className="w-24 px-4 py-3 font-bold">Rating</th>
                             <th className="hidden w-20 px-4 py-3 font-bold sm:table-cell">Owned</th>
+                            <th className="hidden w-28 px-4 py-3 font-bold md:table-cell">Published</th>
                             <th className="hidden w-28 px-4 py-3 font-bold md:table-cell">Added</th>
                         </tr>
                     </thead>
@@ -322,6 +323,9 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                                 </td>
                                 <td className="hidden px-4 py-3 text-brand-muted sm:table-cell">
                                     {(ownedIds ? ownedIds.has(row.bookId) : row.owned) ? "Yes" : ""}
+                                </td>
+                                <td className="hidden px-4 py-3 whitespace-nowrap text-brand-muted md:table-cell">
+                                    {publishedYear(row.published) ?? ""}
                                 </td>
                                 <td className="hidden px-4 py-3 whitespace-nowrap text-brand-muted md:table-cell">
                                     {row.addedAt ?? ""}

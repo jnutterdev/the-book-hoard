@@ -53,7 +53,8 @@ export function authorSortKey(name: string): string {
     return `${surname} ${given}`.toLowerCase();
 }
 
-function yearOf(date: string | null): number | null {
+/** "1965-08-01" or "1965" → 1965. Sorting and the Published column both go by year. */
+export function publishedYear(date: string | null): number | null {
     if (!date) return null;
     const year = Number.parseInt(date.slice(0, 4), 10);
     return Number.isFinite(year) ? year : null;
@@ -74,7 +75,7 @@ function valueFor(row: SortableRow, key: SortKey): string | number | null {
         case "author":
             return row.authors[0] ? authorSortKey(row.authors[0]) : null;
         case "published":
-            return yearOf(row.published);
+            return publishedYear(row.published);
         case "added":
             return row.addedAt;
         case "rating":
