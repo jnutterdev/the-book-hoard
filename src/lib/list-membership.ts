@@ -21,7 +21,13 @@ function nextPosition(tx: Tx, listId: string): string {
  * Adds a book to a list or removes it, queueing the change for Hardcover.
  * A re-add revives the newest old row, so it can cancel an unsent removal.
  */
-export function setListMembership(tx: Tx, bookId: string, listId: string, onList: boolean): void {
+export function setListMembership(
+    tx: Tx,
+    bookId: string,
+    listId: string,
+    onList: boolean,
+    editionId: string | null = null,
+): void {
     const existing = tx
         .select({ id: listItems.id, deletedAt: listItems.deletedAt })
         .from(listItems)
@@ -34,11 +40,11 @@ export function setListMembership(tx: Tx, bookId: string, listId: string, onList
         const position = nextPosition(tx, listId);
         const revived = existing[0];
         if (revived) {
-            tx.update(listItems).set({ deletedAt: null, position }).where(eq(listItems.id, revived.id)).run();
+            tx.update(listItems).set({ deletedAt: null, position, editionId }).where(eq(listItems.id, revived.id)).run();
             enqueue(tx, "list_item", revived.id, "create");
         } else {
             const id = crypto.randomUUID();
-            tx.insert(listItems).values({ id, listId, bookId, position }).run();
+            tx.insert(listItems).values({ id, listId, bookId, position, editionId }).run();
             enqueue(tx, "list_item", id, "create");
         }
     }

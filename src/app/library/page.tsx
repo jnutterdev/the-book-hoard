@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { and, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { books, libraryEntries, type ReadingStatus } from "@/db/schema";
+import { books, libraryEntries, listItems, type ReadingStatus } from "@/db/schema";
 import { ownedBookIds, ownedListId } from "@/lib/list-membership";
 import { parseStatus, STATUS_INFO, STATUS_ORDER } from "@/lib/reading-status";
 
@@ -14,15 +14,69 @@ export const metadata: Metadata = { title: "Library" };
 const visible = and(isNull(libraryEntries.deletedAt), isNull(libraryEntries.hiddenAt));
 const hiddenOnly = and(isNull(libraryEntries.deletedAt), isNotNull(libraryEntries.hiddenAt));
 
-type Filter = { kind: "all" } | { kind: "status"; status: ReadingStatus } | { kind: "hidden" };
+type Filter = { kind: "all" } | { kind: "status"; status: ReadingStatus } | { kind: "hidden" } | { kind: "owned" };
 
-function whereFor(filter: Filter) {
+interface LibraryRow {
+    id: string;
+    bookId: string;
+    status: ReadingStatus | null;
+    rating: number | null;
+    owned: boolean;
+    addedAt: string | null;
+    title: string;
+    subtitle: string | null;
+    authors: string[];
+    coverUrl: string | null;
+}
+
+function whereFor(filter: Exclude<Filter, { kind: "owned" }>) {
     if (filter.kind === "hidden") return hiddenOnly;
     if (filter.kind === "status") return and(visible, eq(libraryEntries.status, filter.status));
     return visible;
 }
 
-function loadLibrary(filter: Filter) {
+/** Everything on the Owned list, including books with no reading status (and so no library entry). */
+function loadOwned(listId: string): LibraryRow[] {
+    return db
+        .select({
+            id: listItems.id,
+            bookId: books.id,
+            status: libraryEntries.status,
+            rating: libraryEntries.rating,
+            hiddenAt: libraryEntries.hiddenAt,
+            addedAt: libraryEntries.addedAt,
+            listedAt: listItems.createdAt,
+            title: books.title,
+            subtitle: books.subtitle,
+            authors: books.authors,
+            coverUrl: books.coverUrl,
+        })
+        .from(listItems)
+        .innerJoin(books, eq(books.id, listItems.bookId))
+        .leftJoin(libraryEntries, and(eq(libraryEntries.bookId, books.id), isNull(libraryEntries.deletedAt)))
+        .where(and(eq(listItems.listId, listId), isNull(listItems.deletedAt), isNull(books.deletedAt)))
+        .orderBy(books.title)
+        .all()
+        .filter((row) => row.hiddenAt === null)
+        .map((row) => ({
+            id: row.id,
+            bookId: row.bookId,
+            status: row.status,
+            rating: row.rating,
+            owned: true,
+            addedAt: row.addedAt ?? row.listedAt.slice(0, 10),
+            title: row.title,
+            subtitle: row.subtitle,
+            authors: row.authors,
+            coverUrl: row.coverUrl,
+        }));
+}
+
+function loadLibrary(filter: Filter): LibraryRow[] {
+    if (filter.kind === "owned") {
+        const listId = ownedListId();
+        return listId ? loadOwned(listId) : [];
+    }
     return db
         .select({
             id: libraryEntries.id,
@@ -61,10 +115,12 @@ function StatusTabs({
     active,
     counts,
     hiddenCount,
+    ownedCount,
 }: {
     active: Filter;
     counts: Map<ReadingStatus, number>;
     hiddenCount: number;
+    ownedCount: number;
 }) {
     const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
     const tabs = [
@@ -76,6 +132,9 @@ function StatusTabs({
             n: counts.get(status) ?? 0,
             isActive: active.kind === "status" && active.status === status,
         })),
+        ...(ownedCount > 0
+            ? [{ key: "owned", href: "/library?owned=1", label: "Owned", n: ownedCount, isActive: active.kind === "owned" }]
+            : []),
         ...(hiddenCount > 0
             ? [{ key: "hidden", href: "/library?hidden=1", label: "Hidden", n: hiddenCount, isActive: active.kind === "hidden" }]
             : []),
@@ -115,14 +174,21 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
     const params = await searchParams;
     const status = parseStatus(typeof params.status === "string" ? params.status : undefined);
     const filter: Filter =
-        params.hidden === "1" ? { kind: "hidden" } : status !== null ? { kind: "status", status } : { kind: "all" };
+        params.hidden === "1"
+            ? { kind: "hidden" }
+            : params.owned === "1"
+              ? { kind: "owned" }
+              : status !== null
+                ? { kind: "status", status }
+                : { kind: "all" };
     const counts = loadStatusCounts();
     const hiddenCount = loadHiddenCount();
     const rows = loadLibrary(filter);
     // Owned means "on Hardcover's Owned list" once that list has synced.
     const ownedIds = ownedListId() ? ownedBookIds() : null;
+    const ownedCount = ownedIds?.size ?? 0;
 
-    if (counts.size === 0 && hiddenCount === 0) {
+    if (counts.size === 0 && hiddenCount === 0 && ownedCount === 0) {
         return (
             <div className="flex flex-col items-center gap-4 rounded-2xl border border-brand-line bg-brand-surface p-10 text-center">
                 <Image
@@ -140,7 +206,7 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
 
     return (
         <div className="flex flex-col gap-4">
-            <StatusTabs active={filter} counts={counts} hiddenCount={hiddenCount} />
+            <StatusTabs active={filter} counts={counts} hiddenCount={hiddenCount} ownedCount={ownedCount} />
             <div className="overflow-hidden rounded-2xl border border-brand-line">
                 <table className="w-full table-fixed text-left text-sm">
                     <thead className="bg-brand-crust text-xs tracking-widest text-brand-muted uppercase">
@@ -177,11 +243,15 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                                     </Link>
                                 </td>
                                 <td className="px-4 py-3">
-                                    <span
-                                        className={`rounded-full px-2.5 py-1 text-xs font-bold whitespace-nowrap ${STATUS_INFO[row.status].chipClass}`}
-                                    >
-                                        {STATUS_INFO[row.status].label}
-                                    </span>
+                                    {row.status === null ? (
+                                        <span className="text-xs text-brand-faint">No status</span>
+                                    ) : (
+                                        <span
+                                            className={`rounded-full px-2.5 py-1 text-xs font-bold whitespace-nowrap ${STATUS_INFO[row.status].chipClass}`}
+                                        >
+                                            {STATUS_INFO[row.status].label}
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="px-4 py-3 whitespace-nowrap">
                                     <Stars rating={row.rating} />

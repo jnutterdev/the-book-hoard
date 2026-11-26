@@ -14,7 +14,15 @@ import {
 } from "@/db/schema";
 import { HardcoverError } from "@/lib/hardcover/client";
 import type { HcList, HcUserBook } from "@/lib/hardcover/library";
-import { deleteListBook, insertListBook, updateUserBook, type UserBookChanges } from "@/lib/hardcover/mutations";
+import { findUserBookId } from "@/lib/hardcover/lookup";
+import { getMe } from "@/lib/hardcover/me";
+import {
+    deleteListBook,
+    insertListBook,
+    insertUserBook,
+    updateUserBook,
+    type UserBookChanges,
+} from "@/lib/hardcover/mutations";
 import { log } from "@/lib/log";
 
 /** Local field → Hardcover `user_books` field. */
@@ -190,6 +198,62 @@ async function pushEntryUpdate(row: OutboxRow, stats: PushStats): Promise<Outcom
     return "sent";
 }
 
+/** A book added here (by an import, say) goes into the Hardcover library. */
+async function pushEntryCreate(row: OutboxRow, stats: PushStats, userId: () => Promise<number>): Promise<Outcome> {
+    const entry = db.select().from(libraryEntries).where(eq(libraryEntries.id, row.entityId)).get();
+    if (!entry || entry.deletedAt || externalIdOf("library_entry", row.entityId) !== null) {
+        markSent(row.id);
+        return "sent";
+    }
+    const hcBookId = externalIdOf("book", entry.bookId);
+    if (hcBookId === null) throw new Error("This book isn't linked to Hardcover yet");
+
+    // Already on Hardcover (added there since the import)? Link it; the next pull brings it in.
+    let remoteId = await findUserBookId(await userId(), hcBookId);
+    if (remoteId === null) {
+        remoteId = await insertUserBook({
+            book_id: hcBookId,
+            edition_id: entry.editionId ? externalIdOf("edition", entry.editionId) : null,
+            status_id: entry.status,
+            rating: entry.rating,
+        });
+        stats.pushed++;
+    }
+
+    const linkedElsewhere = db
+        .select({ entityId: externalIds.entityId })
+        .from(externalIds)
+        .where(
+            and(
+                eq(externalIds.source, "hardcover"),
+                eq(externalIds.entityType, "library_entry"),
+                eq(externalIds.externalId, String(remoteId)),
+            ),
+        )
+        .get();
+
+    db.transaction((tx) => {
+        if (linkedElsewhere) {
+            // A pull already brought Hardcover's copy in, so this one is a duplicate.
+            tx.update(libraryEntries)
+                .set({ deletedAt: new Date().toISOString() })
+                .where(eq(libraryEntries.id, entry.id))
+                .run();
+        } else {
+            tx.insert(externalIds)
+                .values({
+                    source: "hardcover",
+                    entityType: "library_entry",
+                    entityId: entry.id,
+                    externalId: String(remoteId),
+                })
+                .run();
+        }
+        tx.update(syncOutbox).set({ status: "sent", lastError: null }).where(eq(syncOutbox.id, row.id)).run();
+    });
+    return "sent";
+}
+
 async function pushListItem(row: OutboxRow, stats: PushStats): Promise<Outcome> {
     const item = db.select().from(listItems).where(eq(listItems.id, row.entityId)).get();
     const linkedId = externalIdOf("list_item", row.entityId);
@@ -230,7 +294,8 @@ async function pushListItem(row: OutboxRow, stats: PushStats): Promise<Outcome> 
             .from(libraryEntries)
             .where(and(eq(libraryEntries.bookId, item.bookId), isNull(libraryEntries.deletedAt)))
             .get();
-        const hcEditionId = entry?.editionId ? externalIdOf("edition", entry.editionId) : null;
+        const editionId = item.editionId ?? entry?.editionId ?? null;
+        const hcEditionId = editionId ? externalIdOf("edition", editionId) : null;
         remoteId = await insertListBook({ listId: hcListId, bookId: hcBookId, editionId: hcEditionId });
         stats.pushed++;
     }
@@ -258,10 +323,19 @@ export async function pushOutbox(): Promise<PushStats> {
         .orderBy(asc(syncOutbox.createdAt))
         .all();
 
+    let meId: number | null = null;
+    const userId = async (): Promise<number> => {
+        meId ??= (await getMe()).id;
+        return meId;
+    };
+
     for (const row of rows) {
         try {
             let outcome: Outcome;
             if (row.entityType === "library_entry" && row.op === "update") outcome = await pushEntryUpdate(row, stats);
+            else if (row.entityType === "library_entry" && row.op === "create") {
+                outcome = await pushEntryCreate(row, stats, userId);
+            }
             else if (row.entityType === "list_item") outcome = await pushListItem(row, stats);
             else throw new Error(`Pushing ${row.op} for ${row.entityType} isn't supported yet`);
             if (outcome === "waiting") stats.awaitingApproval++;

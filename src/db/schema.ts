@@ -146,6 +146,8 @@ export const listItems = sqliteTable(
       .notNull()
       .references(() => books.id),
     position: text("position").notNull(),
+    /** Edition to send with this entry (Hardcover's Owned list stores editions). Optional. */
+    editionId: text("edition_id").references(() => editions.id),
     ...timestamps,
   },
   (t) => [index("list_items_list_position_idx").on(t.listId, t.position)],
@@ -258,6 +260,40 @@ export const syncRuns = sqliteTable(
 );
 
 export type ImportSource = "goodreads" | "storygraph";
+export type ImportStatus = "parsing" | "review" | "committed" | "failed";
+export type ImportMatchStatus = "matched" | "needs_review" | "skipped";
+export type ImportMatchSource = "local" | "isbn" | "search" | "manual";
+
+/** One CSV row, cleaned up. Source-neutral so Goodreads can reuse it. */
+export interface ParsedImportRow {
+  title: string;
+  authors: string[];
+  isbn13: string | null;
+  isbn10: string | null;
+  asin: string | null;
+  format: string | null;
+  /** Paperback, hardcover, or no format given. Only physical copies count as owned. */
+  physical: boolean;
+  status: ReadingStatus | null;
+  rating: number | null;
+  /** Read dates as given (StoryGraph often has year only). */
+  readDates: string[];
+  owned: boolean;
+}
+
+/** A Hardcover book an import row matched or could match. */
+export interface ImportCandidate {
+  hcBookId: number;
+  hcEditionId: number | null;
+  title: string;
+  authors: string[];
+  year: number | null;
+  imageUrl: string | null;
+  readers: number;
+}
+
+/** Per-field pick when the import and the library disagree. */
+export type ImportChoice = "import" | "current";
 
 export const imports = sqliteTable("imports", {
   id: id(),
@@ -266,7 +302,7 @@ export const imports = sqliteTable("imports", {
   rowCount: integer("row_count").notNull().default(0),
   matched: integer("matched").notNull().default(0),
   unmatched: integer("unmatched").notNull().default(0),
-  status: text("status").$type<"parsing" | "review" | "committed" | "failed">().notNull(),
+  status: text("status").$type<ImportStatus>().notNull(),
   ...timestamps,
 });
 
@@ -278,8 +314,17 @@ export const importRows = sqliteTable(
       .notNull()
       .references(() => imports.id),
     raw: text("raw", { mode: "json" }).$type<Record<string, string>>().notNull(),
-    matchStatus: text("match_status").$type<"matched" | "needs_review" | "skipped">().notNull(),
+    matchStatus: text("match_status").$type<ImportMatchStatus>().notNull(),
     bookId: text("book_id").references(() => books.id),
+    parsed: text("parsed", { mode: "json" }).$type<ParsedImportRow>(),
+    matchSource: text("match_source").$type<ImportMatchSource>(),
+    /** The Hardcover book this row goes to (null when matched to a local-only book or not matched). */
+    match: text("match", { mode: "json" }).$type<ImportCandidate>(),
+    candidates: text("candidates", { mode: "json" }).$type<ImportCandidate[]>(),
+    choices: text("choices", { mode: "json" }).$type<Record<string, ImportChoice>>(),
+    /** Why a row was skipped, in plain words. */
+    note: text("note"),
+    committedAt: text("committed_at"),
     ...timestamps,
   },
   (t) => [index("import_rows_import_idx").on(t.importId)],

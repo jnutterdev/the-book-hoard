@@ -5,7 +5,11 @@ import { Suspense } from "react";
 import { and, count, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { libraryEntries, lists } from "@/db/schema";
-import { HardcoverCard, HardcoverCardFallback } from "@/components/HardcoverCard";
+import { ownedBookIds } from "@/lib/list-membership";
+import {
+    HardcoverCard,
+    HardcoverCardFallback,
+} from "@/components/HardcoverCard";
 
 async function HoardCounts() {
     // better-sqlite3 is synchronous, so mark this as request-time work or Next bakes the counts in at build.
@@ -13,18 +17,30 @@ async function HoardCounts() {
     const [bookCount] = await db
         .select({ n: count() })
         .from(libraryEntries)
-        .where(and(isNull(libraryEntries.deletedAt), isNull(libraryEntries.hiddenAt)));
+        .where(
+            and(
+                isNull(libraryEntries.deletedAt),
+                isNull(libraryEntries.hiddenAt),
+            ),
+        );
     const [listCount] = await db
         .select({ n: count() })
         .from(lists)
         .where(isNull(lists.deletedAt));
+
+    // Owned books include ones with no reading status, which aren't library entries.
+    const ownedCount = ownedBookIds().size;
 
     return (
         <p className="text-brand-muted">
             <span className="text-3xl font-extrabold text-brand-accent">
                 {bookCount.n}
             </span>{" "}
-            books ·{" "}
+            in your library ·{" "}
+            <span className="text-3xl font-extrabold text-brand-accent">
+                {ownedCount}
+            </span>{" "}
+            owned ·{" "}
             <span className="text-3xl font-extrabold text-brand-accent">
                 {listCount.n}
             </span>{" "}
@@ -54,7 +70,10 @@ export default function Home() {
                 </div>
             </header>
 
-            <Link href="/library" className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6 transition hover:border-brand-accent">
+            <Link
+                href="/library"
+                className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6 transition hover:border-brand-accent"
+            >
                 <div className="flex flex-col gap-2">
                     <h2 className="text-sm font-bold tracking-widest text-brand-muted uppercase">
                         Your hoard
@@ -69,7 +88,7 @@ export default function Home() {
                     src="/art/dragon-napping-on-emptyshelf.png"
                     alt="a chibi dragon napping on an empty shelf"
                     width={140}
-                    height={140}
+                    height={135}
                     loading="eager"
                     className="h-auto w-16"
                 />

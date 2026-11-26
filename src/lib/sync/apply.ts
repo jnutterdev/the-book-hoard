@@ -81,7 +81,7 @@ function authorsOf(book: HcBook): string[] {
     return (authors.length > 0 ? authors : named).map((c) => c.author?.name ?? "");
 }
 
-function upsertBook(tx: Tx, book: HcBook): string {
+export function upsertBook(tx: Tx, book: HcBook): string {
     const values = {
         title: book.title,
         subtitle: book.subtitle,
@@ -113,7 +113,7 @@ function upsertBook(tx: Tx, book: HcBook): string {
     return id;
 }
 
-function upsertEdition(tx: Tx, bookId: string, edition: HcEdition): string {
+export function upsertEdition(tx: Tx, bookId: string, edition: HcEdition): string {
     const values = {
         bookId,
         isbn10: edition.isbn_10,
@@ -211,12 +211,19 @@ export function applyUserBook(tx: Tx, remote: HcUserBook): boolean {
         keptReadIds.push(readId);
     }
 
+    // Only reads that came from Hardcover can disappear from it. Local-only reads
+    // (dates from imports, not pushed yet) stay.
+    const hardcoverReadIds = tx
+        .select({ id: externalIds.entityId })
+        .from(externalIds)
+        .where(and(eq(externalIds.source, "hardcover"), eq(externalIds.entityType, "read")));
     tx.update(reads)
         .set({ deletedAt: new Date().toISOString() })
         .where(
             and(
                 eq(reads.libraryEntryId, entryId),
                 isNull(reads.deletedAt),
+                inArray(reads.id, hardcoverReadIds),
                 keptReadIds.length > 0 ? notInArray(reads.id, keptReadIds) : undefined,
             ),
         )

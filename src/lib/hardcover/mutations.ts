@@ -67,3 +67,32 @@ export async function deleteListBook(listBookId: number): Promise<void> {
         throw new HardcoverError("graphql", "Hardcover didn't confirm the removal");
     }
 }
+
+const INSERT_USER_BOOK = /* GraphQL */ `
+    mutation InsertUserBook($object: UserBookCreateInput!) {
+        insert_user_book(object: $object) {
+            id
+            error
+        }
+    }
+`;
+
+export interface NewUserBook {
+    book_id: number;
+    edition_id: number | null;
+    status_id: number;
+    rating: number | null;
+}
+
+/** Adds a book to the Hardcover library. Returns the new `user_books` id. */
+export async function insertUserBook(object: NewUserBook): Promise<number> {
+    const data = await hardcoverRequest<{ insert_user_book: { id: number | null; error: string | null } | null }>(
+        INSERT_USER_BOOK,
+        { object },
+    );
+    const result = data.insert_user_book;
+    if (!result || result.error || !result.id) {
+        throw new HardcoverError("graphql", result?.error ?? "Hardcover didn't return the new library entry");
+    }
+    return result.id;
+}

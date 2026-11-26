@@ -152,8 +152,9 @@ async function BookDetail({ params }: { params: Promise<{ id: string }> }) {
                         />
                     ) : (
                         <p className="text-sm text-brand-muted">
-                            This book is on one of your lists but not in your library, so there&rsquo;s no status or
-                            rating to edit.
+                            {data.owned
+                                ? "On your Owned list, with no reading status yet, so it isn't in your library."
+                                : "On one of your lists but not in your library, so there's no status or rating to edit."}
                         </p>
                     )}
 

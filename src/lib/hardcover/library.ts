@@ -66,7 +66,7 @@ export interface HcList {
     list_books: HcListBook[];
 }
 
-const BOOK_FIELDS = /* GraphQL */ `
+export const BOOK_FIELDS = /* GraphQL */ `
     id
     slug
     title
@@ -76,6 +76,16 @@ const BOOK_FIELDS = /* GraphQL */ `
     release_date
     cached_image
     cached_contributors
+`;
+
+export const EDITION_FIELDS = /* GraphQL */ `
+    id
+    isbn_10
+    isbn_13
+    edition_format
+    physical_format
+    pages
+    publisher { name }
 `;
 
 const LIBRARY_PAGE_QUERY = /* GraphQL */ `
@@ -91,15 +101,7 @@ const LIBRARY_PAGE_QUERY = /* GraphQL */ `
             date_added
             updated_at
             book { ${BOOK_FIELDS} }
-            edition {
-                id
-                isbn_10
-                isbn_13
-                edition_format
-                physical_format
-                pages
-                publisher { name }
-            }
+            edition { ${EDITION_FIELDS} }
             user_book_reads(order_by: { id: asc }) {
                 id
                 started_at

@@ -6,6 +6,7 @@ import { SyncPanel } from "./SyncPanel";
 const NAV = [
     { href: "/", label: "Home" },
     { href: "/library", label: "Library" },
+    { href: "/import", label: "Import" },
     { href: "/sync", label: "Sync" },
 ] as const;
 
