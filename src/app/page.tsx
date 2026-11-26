@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { count, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { books, lists } from "@/db/schema";
+import { HardcoverCard, HardcoverCardFallback } from "@/components/HardcoverCard";
 
 async function HoardCounts() {
     // better-sqlite3 is synchronous, so mark this as request-time work or Next bakes the counts in at build.
@@ -73,25 +74,9 @@ export default function Home() {
                 />
             </section>
 
-            <section className="flex items-center justify-between gap-6 rounded-2xl border border-brand-line bg-brand-surface p-6">
-                <div className="flex flex-col gap-2">
-                    <h2 className="text-sm font-bold tracking-widest text-brand-muted uppercase">
-                        Hardcover
-                    </h2>
-                    <p className="text-lg font-bold">Not connected yet</p>
-                    <p className="text-brand-muted">
-                        The sync robot is waiting on its client.
-                    </p>
-                </div>
-                <Image
-                    src="/art/robot-syncing.png"
-                    alt="a robot with a syncing image"
-                    width={120}
-                    height={120}
-                    loading="eager"
-                    className="h-auto w-16"
-                />
-            </section>
+            <Suspense fallback={<HardcoverCardFallback />}>
+                <HardcoverCard />
+            </Suspense>
         </main>
     );
 }
