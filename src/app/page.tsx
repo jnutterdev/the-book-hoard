@@ -1,9 +1,9 @@
 import Image from "next/image";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { count, isNull } from "drizzle-orm";
+import { and, count, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { books, lists } from "@/db/schema";
+import { libraryEntries, lists } from "@/db/schema";
 import { HardcoverCard, HardcoverCardFallback } from "@/components/HardcoverCard";
 
 async function HoardCounts() {
@@ -11,8 +11,8 @@ async function HoardCounts() {
     await connection();
     const [bookCount] = await db
         .select({ n: count() })
-        .from(books)
-        .where(isNull(books.deletedAt));
+        .from(libraryEntries)
+        .where(and(isNull(libraryEntries.deletedAt), isNull(libraryEntries.hiddenAt)));
     const [listCount] = await db
         .select({ n: count() })
         .from(lists)

@@ -94,6 +94,8 @@ export const libraryEntries = sqliteTable(
     owned: integer("owned", { mode: "boolean" }).notNull().default(false),
     privacy: integer("privacy"),
     notes: text("notes"),
+    /** Date the book joined the library on Hardcover (`user_books.date_added`). */
+    addedAt: text("added_at"),
     hiddenAt: text("hidden_at"),
     ...timestamps,
   },
@@ -196,20 +198,49 @@ export const syncConflicts = sqliteTable(
   (t) => [index("sync_conflicts_open_idx").on(t.resolvedAt)],
 );
 
-export const syncRuns = sqliteTable("sync_runs", {
-  id: id(),
-  source: text("source").$type<ExternalSource>().notNull(),
-  kind: text("kind").$type<"incremental" | "full">().notNull(),
-  startedAt: text("started_at").notNull(),
-  finishedAt: text("finished_at"),
-  /** Newest remote `updated_at` seen, used as the next incremental cursor. */
-  cursor: text("cursor"),
-  pulled: integer("pulled").notNull().default(0),
-  pushed: integer("pushed").notNull().default(0),
-  conflicts: integer("conflicts").notNull().default(0),
-  error: text("error"),
-  ...timestamps,
-});
+export type SyncKind = "incremental" | "full";
+export type SyncTrigger = "manual" | "auto";
+
+export interface SyncStats {
+  booksChanged: number;
+  booksRemoved: number;
+  listsChanged: number;
+  listsRemoved: number;
+}
+
+/** What went wrong, for the Sync page. Never holds the token or request headers. */
+export interface SyncErrorDetail {
+  kind: string;
+  step: string;
+  status?: number;
+  graphqlErrors?: { message: string; code?: string }[];
+  /** Set by the deletion guard: how many records the run would have removed. */
+  wouldRemove?: { books: number; lists: number; listItems: number };
+  /** Set when the daily quota ran out. */
+  retryAfter?: string;
+}
+
+export const syncRuns = sqliteTable(
+  "sync_runs",
+  {
+    id: id(),
+    source: text("source").$type<ExternalSource>().notNull(),
+    kind: text("kind").$type<SyncKind>().notNull(),
+    trigger: text("trigger").$type<SyncTrigger>().notNull().default("manual"),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    /** Newest remote `updated_at` seen, used as the next incremental cursor. */
+    cursor: text("cursor"),
+    pulled: integer("pulled").notNull().default(0),
+    pushed: integer("pushed").notNull().default(0),
+    conflicts: integer("conflicts").notNull().default(0),
+    stats: text("stats", { mode: "json" }).$type<SyncStats>(),
+    error: text("error"),
+    errorDetail: text("error_detail", { mode: "json" }).$type<SyncErrorDetail>(),
+    ...timestamps,
+  },
+  (t) => [index("sync_runs_started_idx").on(t.startedAt)],
+);
 
 export type ImportSource = "goodreads" | "storygraph";
 

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { log } from "@/lib/log";
 import { RateLimiter, retryAfterMs, sleep } from "./rate-limiter";
 
 const ENDPOINT = "https://api.hardcover.app/v1/graphql";
@@ -30,17 +31,20 @@ export class HardcoverError extends Error {
     readonly kind: HardcoverErrorKind;
     readonly status?: number;
     readonly graphqlErrors?: GraphQLErrorItem[];
+    /** ISO time the daily quota resets, when that's why we stopped. */
+    readonly resetsAt?: string;
 
     constructor(
         kind: HardcoverErrorKind,
         message: string,
-        options: { status?: number; graphqlErrors?: GraphQLErrorItem[]; cause?: unknown } = {},
+        options: { status?: number; graphqlErrors?: GraphQLErrorItem[]; resetsAt?: string; cause?: unknown } = {},
     ) {
         super(message, { cause: options.cause });
         this.name = "HardcoverError";
         this.kind = kind;
         this.status = options.status;
         this.graphqlErrors = options.graphqlErrors;
+        this.resetsAt = options.resetsAt;
     }
 }
 
@@ -79,8 +83,10 @@ export async function hardcoverRequest<TData, TVariables extends Variables = Var
     for (let attempt = 1; ; attempt++) {
         const allowed = await limiter.acquire();
         if (!allowed) {
-            const resetsAt = limiter.dailyResetsAt?.toISOString() ?? "later";
-            throw new HardcoverError("rate_limited", `Daily Hardcover quota used up; resets ${resetsAt}`);
+            const resetsAt = limiter.dailyResetsAt?.toISOString();
+            throw new HardcoverError("rate_limited", `Daily Hardcover quota used up; resets ${resetsAt ?? "later"}`, {
+                resetsAt,
+            });
         }
 
         let response: Response;
@@ -97,6 +103,7 @@ export async function hardcoverRequest<TData, TVariables extends Variables = Var
             });
         } catch (cause) {
             if (attempt < MAX_ATTEMPTS) {
+                void log.warn("Hardcover request failed, retrying", { attempt }, cause);
                 await sleep(backoffMs(attempt));
                 continue;
             }
@@ -114,11 +121,13 @@ export async function hardcoverRequest<TData, TVariables extends Variables = Var
         if (response.status === 429) {
             const waitMs = retryAfterMs(response.headers) ?? backoffMs(attempt);
             limiter.pauseFor(waitMs);
+            void log.warn("Hardcover rate limited us", { attempt, waitMs });
             if (attempt < MAX_ATTEMPTS) continue;
             throw new HardcoverError("rate_limited", "Hardcover kept rate limiting us", { status: 429 });
         }
 
         if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
+            void log.warn("Hardcover server error, retrying", { attempt, status: response.status });
             await sleep(backoffMs(attempt));
             continue;
         }

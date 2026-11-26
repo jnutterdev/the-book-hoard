@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  images: {
+    remotePatterns: [new URL("https://assets.hardcover.app/**")],
+  },
   turbopack: {
     rules: {
       "*.css": {
