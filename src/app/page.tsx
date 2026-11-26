@@ -36,15 +36,15 @@ async function HoardCounts() {
             <span className="text-3xl font-extrabold text-brand-accent">
                 {bookCount.n}
             </span>{" "}
-            in your library ·{" "}
+            stories travelled ·{" "}
             <span className="text-3xl font-extrabold text-brand-accent">
                 {ownedCount}
             </span>{" "}
-            owned ·{" "}
+            hoarded ·{" "}
             <span className="text-3xl font-extrabold text-brand-accent">
                 {listCount.n}
             </span>{" "}
-            lists
+            {listCount.n === 1 ? "list" : "lists"}
         </p>
     );
 }
