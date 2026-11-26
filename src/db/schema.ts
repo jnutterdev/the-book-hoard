@@ -181,6 +181,10 @@ export const syncOutbox = sqliteTable(
     status: text("status").$type<OutboxStatus>().notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
+    /** Each changed field's value before the first local edit: the "base" for conflict checks. */
+    baseValues: text("base_values", { mode: "json" }).$type<Record<string, unknown>>(),
+    /** Long text (reviews, notes) only pushes once approved. */
+    approvedAt: text("approved_at"),
     ...timestamps,
   },
   (t) => [index("sync_outbox_status_idx").on(t.status, t.createdAt)],
@@ -213,6 +217,10 @@ export interface SyncStats {
   booksRemoved: number;
   listsChanged: number;
   listsRemoved: number;
+  /** Push results; absent on runs from before push existed. */
+  pushed?: number;
+  pushFailed?: number;
+  conflicts?: number;
 }
 
 /** What went wrong, for the Sync page. Never holds the token or request headers. */

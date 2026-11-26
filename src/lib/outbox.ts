@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { syncOutbox, type OutboxOp, type SyncedEntity } from "@/db/schema";
+import { syncConflicts, syncOutbox, type OutboxOp, type SyncedEntity } from "@/db/schema";
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -17,11 +17,21 @@ function pendingFor(tx: Tx, entityType: SyncedEntity, entityId: string) {
 }
 
 /**
- * Records a local change for milestone 4 to push. Call it inside the same
+ * Records a local change to push to Hardcover. Call it inside the same
  * transaction as the change itself. Repeated updates to one record merge into a
  * single row, and a delete of something never pushed cancels its create.
+ *
+ * `baseValues` holds each field's value before this edit. Only the first edit's
+ * base is kept, since that's the last value Hardcover is known to have had.
  */
-export function enqueue(tx: Tx, entityType: SyncedEntity, entityId: string, op: OutboxOp, changedFields: string[] = []): void {
+export function enqueue(
+    tx: Tx,
+    entityType: SyncedEntity,
+    entityId: string,
+    op: OutboxOp,
+    changedFields: string[] = [],
+    baseValues: Record<string, unknown> = {},
+): void {
     const pending = pendingFor(tx, entityType, entityId);
     const now = new Date().toISOString();
 
@@ -30,7 +40,11 @@ export function enqueue(tx: Tx, entityType: SyncedEntity, entityId: string, op: 
         if (existing) {
             if (existing.op === "update") {
                 const merged = [...new Set([...existing.changedFields, ...changedFields])];
-                tx.update(syncOutbox).set({ changedFields: merged }).where(eq(syncOutbox.id, existing.id)).run();
+                const bases = { ...baseValues, ...(existing.baseValues ?? {}) };
+                tx.update(syncOutbox)
+                    .set({ changedFields: merged, baseValues: bases })
+                    .where(eq(syncOutbox.id, existing.id))
+                    .run();
             }
             // A pending create already sends the whole record.
             return;
@@ -60,15 +74,28 @@ export function enqueue(tx: Tx, entityType: SyncedEntity, entityId: string, op: 
         }
     }
 
-    tx.insert(syncOutbox).values({ entityType, entityId, op, changedFields }).run();
+    tx.insert(syncOutbox).values({ entityType, entityId, op, changedFields, baseValues }).run();
 }
 
-/** Fields with an unsent local edit, so a pull knows not to overwrite them. */
+/** Fields with an unsent local edit or an open conflict, so a pull knows not to overwrite them. */
 export function pendingFields(tx: Tx, entityType: SyncedEntity, entityId: string): Set<string> {
     const fields = new Set<string>();
     for (const row of pendingFor(tx, entityType, entityId)) {
         for (const field of row.changedFields) fields.add(field);
     }
+    const conflicts = tx
+        .select({ field: syncConflicts.field })
+        .from(syncConflicts)
+        .where(
+            and(
+                eq(syncConflicts.entityType, entityType),
+                eq(syncConflicts.entityId, entityId),
+                isNull(syncConflicts.resolvedAt),
+                isNull(syncConflicts.deletedAt),
+            ),
+        )
+        .all();
+    for (const conflict of conflicts) fields.add(conflict.field);
     return fields;
 }
 

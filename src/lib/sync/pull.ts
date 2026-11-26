@@ -14,6 +14,7 @@ import {
 import { getMe } from "@/lib/hardcover/me";
 import { backfillOwnedList } from "@/lib/list-membership";
 import { log } from "@/lib/log";
+import { isPushEnabled, pushOutbox } from "./push";
 import {
     activeLinked,
     activeListItemsByList,
@@ -184,6 +185,15 @@ async function pull({ trigger, confirmDeletions = false }: PullOptions): Promise
 
         step = "queueing owned books for the Owned list";
         backfillOwnedList();
+
+        // Push after the pull, so conflict checks compare against what Hardcover has right now.
+        if (isPushEnabled()) {
+            step = "sending changes to Hardcover";
+            const pushed = await pushOutbox();
+            stats.pushed = pushed.pushed;
+            stats.pushFailed = pushed.failed;
+            stats.conflicts = pushed.conflicts;
+        }
 
         finishRunOk(run.runId, stats, laterOf(run.cursor, newestUpdate));
         return { status: "ok", kind: run.kind, stats };

@@ -26,8 +26,10 @@ function activeEntry(entryId: string) {
 function updateEntry(entryId: string, values: Partial<typeof libraryEntries.$inferInsert>, field: string): EditResult {
     if (!activeEntry(entryId)) return fail("That book isn't in your library anymore.");
     db.transaction((tx) => {
+        const before = tx.select().from(libraryEntries).where(eq(libraryEntries.id, entryId)).get();
+        const base = before ? { [field]: (before as Record<string, unknown>)[field] } : {};
         tx.update(libraryEntries).set(values).where(eq(libraryEntries.id, entryId)).run();
-        enqueue(tx, "library_entry", entryId, "update", [field]);
+        enqueue(tx, "library_entry", entryId, "update", [field], base);
     });
     refresh();
     return { ok: true };

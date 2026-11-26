@@ -6,6 +6,7 @@ import { desc } from "drizzle-orm";
 import { db } from "@/db/client";
 import { syncRuns } from "@/db/schema";
 import { summarizeStats } from "@/lib/sync/summary";
+import { SyncQueuePanel } from "@/components/sync/SyncQueuePanel";
 
 export const metadata: Metadata = { title: "Sync" };
 
@@ -77,9 +78,13 @@ export default function SyncPage() {
                 <Image src="/art/robot-syncing.png" alt="" width={72} height={61} className="h-auto w-18" />
                 <div>
                     <h1 className="text-3xl font-extrabold tracking-tight">Sync</h1>
-                    <p className="text-brand-muted">The last {RUNS_SHOWN} runs between here and Hardcover.</p>
+                    <p className="text-brand-muted">What&rsquo;s waiting to go to Hardcover, and the last {RUNS_SHOWN} runs.</p>
                 </div>
             </header>
+            <Suspense fallback={null}>
+                <SyncQueuePanel />
+            </Suspense>
+            <h2 className="text-lg font-extrabold">History</h2>
             <Suspense fallback={<p className="text-brand-muted">Loading runs…</p>}>
                 <RunHistory />
             </Suspense>
