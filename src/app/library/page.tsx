@@ -3,11 +3,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { and, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { books, libraryEntries, listItems, type ReadingStatus } from "@/db/schema";
 import { ownedBookIds, ownedListId } from "@/lib/list-membership";
 import { parseStatus, STATUS_INFO, STATUS_ORDER } from "@/lib/reading-status";
+import { DEFAULT_SORT, parseSort, SORT_OPTIONS, sortRows, type SortDir, type SortKey } from "@/lib/library-sort";
 
 export const metadata: Metadata = { title: "Library" };
 
@@ -23,6 +24,7 @@ interface LibraryRow {
     rating: number | null;
     owned: boolean;
     addedAt: string | null;
+    published: string | null;
     title: string;
     subtitle: string | null;
     authors: string[];
@@ -46,6 +48,7 @@ function loadOwned(listId: string): LibraryRow[] {
             hiddenAt: libraryEntries.hiddenAt,
             addedAt: libraryEntries.addedAt,
             listedAt: listItems.createdAt,
+            published: books.firstPublished,
             title: books.title,
             subtitle: books.subtitle,
             authors: books.authors,
@@ -55,7 +58,6 @@ function loadOwned(listId: string): LibraryRow[] {
         .innerJoin(books, eq(books.id, listItems.bookId))
         .leftJoin(libraryEntries, and(eq(libraryEntries.bookId, books.id), isNull(libraryEntries.deletedAt)))
         .where(and(eq(listItems.listId, listId), isNull(listItems.deletedAt), isNull(books.deletedAt)))
-        .orderBy(books.title)
         .all()
         .filter((row) => row.hiddenAt === null)
         .map((row) => ({
@@ -65,6 +67,7 @@ function loadOwned(listId: string): LibraryRow[] {
             rating: row.rating,
             owned: true,
             addedAt: row.addedAt ?? row.listedAt.slice(0, 10),
+            published: row.published,
             title: row.title,
             subtitle: row.subtitle,
             authors: row.authors,
@@ -85,6 +88,7 @@ function loadLibrary(filter: Filter): LibraryRow[] {
             rating: libraryEntries.rating,
             owned: libraryEntries.owned,
             addedAt: libraryEntries.addedAt,
+            published: books.firstPublished,
             title: books.title,
             subtitle: books.subtitle,
             authors: books.authors,
@@ -93,7 +97,6 @@ function loadLibrary(filter: Filter): LibraryRow[] {
         .from(libraryEntries)
         .innerJoin(books, eq(books.id, libraryEntries.bookId))
         .where(whereFor(filter))
-        .orderBy(desc(libraryEntries.addedAt), books.title)
         .all();
 }
 
@@ -111,32 +114,88 @@ function loadHiddenCount(): number {
     return db.select({ n: count() }).from(libraryEntries).where(hiddenOnly).get()?.n ?? 0;
 }
 
+interface Sort {
+    key: SortKey;
+    dir: SortDir;
+}
+
+function filterParams(filter: Filter): Record<string, string> {
+    if (filter.kind === "hidden") return { hidden: "1" };
+    if (filter.kind === "owned") return { owned: "1" };
+    if (filter.kind === "status") return { status: String(filter.status) };
+    return {};
+}
+
+/** A /library link that keeps the filter and sort, so switching one doesn't reset the other. */
+function libraryHref(filter: Filter, sort: Sort): string {
+    const params = new URLSearchParams(filterParams(filter));
+    const isDefault = sort.key === DEFAULT_SORT.key && sort.dir === DEFAULT_SORT.dir;
+    if (!isDefault) {
+        params.set("sort", sort.key);
+        params.set("dir", sort.dir);
+    }
+    const query = params.toString();
+    return query ? `/library?${query}` : "/library";
+}
+
+function SortLinks({ filter, sort }: { filter: Filter; sort: Sort }) {
+    return (
+        <nav aria-label="Sort" className="flex flex-wrap items-center gap-1 text-sm">
+            <span className="mr-1 text-brand-muted">Sort</span>
+            {SORT_OPTIONS.map((option) => {
+                const isActive = option.key === sort.key;
+                // Clicking the active sort flips it; any other starts at its own default.
+                const next: Sort = isActive
+                    ? { key: option.key, dir: sort.dir === "asc" ? "desc" : "asc" }
+                    : { key: option.key, dir: option.defaultDir };
+                return (
+                    <Link
+                        key={option.key}
+                        href={libraryHref(filter, next)}
+                        aria-current={isActive ? "true" : undefined}
+                        className={
+                            isActive
+                                ? "rounded-full bg-brand-line/60 px-2.5 py-0.5 font-bold text-brand-text"
+                                : "rounded-full px-2.5 py-0.5 text-brand-muted hover:text-brand-text"
+                        }
+                    >
+                        {option.label}
+                        {isActive ? <span aria-hidden="true"> {sort.dir === "asc" ? "↑" : "↓"}</span> : null}
+                    </Link>
+                );
+            })}
+        </nav>
+    );
+}
+
 function StatusTabs({
     active,
+    sort,
     counts,
     hiddenCount,
     ownedCount,
 }: {
     active: Filter;
+    sort: Sort;
     counts: Map<ReadingStatus, number>;
     hiddenCount: number;
     ownedCount: number;
 }) {
     const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
     const tabs = [
-        { key: "all", href: "/library", label: "All", n: total, isActive: active.kind === "all" },
+        { key: "all", href: libraryHref({ kind: "all" }, sort), label: "All", n: total, isActive: active.kind === "all" },
         ...STATUS_ORDER.filter((status) => counts.has(status)).map((status) => ({
             key: String(status),
-            href: `/library?status=${status}`,
+            href: libraryHref({ kind: "status", status }, sort),
             label: STATUS_INFO[status].label,
             n: counts.get(status) ?? 0,
             isActive: active.kind === "status" && active.status === status,
         })),
         ...(ownedCount > 0
-            ? [{ key: "owned", href: "/library?owned=1", label: "Owned", n: ownedCount, isActive: active.kind === "owned" }]
+            ? [{ key: "owned", href: libraryHref({ kind: "owned" }, sort), label: "Owned", n: ownedCount, isActive: active.kind === "owned" }]
             : []),
         ...(hiddenCount > 0
-            ? [{ key: "hidden", href: "/library?hidden=1", label: "Hidden", n: hiddenCount, isActive: active.kind === "hidden" }]
+            ? [{ key: "hidden", href: libraryHref({ kind: "hidden" }, sort), label: "Hidden", n: hiddenCount, isActive: active.kind === "hidden" }]
             : []),
     ];
 
@@ -183,7 +242,11 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                 : { kind: "all" };
     const counts = loadStatusCounts();
     const hiddenCount = loadHiddenCount();
-    const rows = loadLibrary(filter);
+    const sort = parseSort(
+        typeof params.sort === "string" ? params.sort : undefined,
+        typeof params.dir === "string" ? params.dir : undefined,
+    );
+    const rows = sortRows(loadLibrary(filter), sort.key, sort.dir);
     // Owned means "on Hardcover's Owned list" once that list has synced.
     const ownedIds = ownedListId() ? ownedBookIds() : null;
     const ownedCount = ownedIds?.size ?? 0;
@@ -206,7 +269,8 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
 
     return (
         <div className="flex flex-col gap-4">
-            <StatusTabs active={filter} counts={counts} hiddenCount={hiddenCount} ownedCount={ownedCount} />
+            <StatusTabs active={filter} sort={sort} counts={counts} hiddenCount={hiddenCount} ownedCount={ownedCount} />
+            <SortLinks filter={filter} sort={sort} />
             <div className="overflow-hidden rounded-2xl border border-brand-line">
                 <table className="w-full table-fixed text-left text-sm">
                     <thead className="bg-brand-crust text-xs tracking-widest text-brand-muted uppercase">
