@@ -36,7 +36,7 @@ async function HoardCounts() {
             <span className="text-3xl font-extrabold text-brand-accent">
                 {bookCount.n}
             </span>{" "}
-            stories travelled ·{" "}
+            stories traveled ·{" "}
             <span className="text-3xl font-extrabold text-brand-accent">
                 {ownedCount}
             </span>{" "}
