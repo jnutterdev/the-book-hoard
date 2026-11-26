@@ -4,6 +4,7 @@ import { hardcoverRequest } from "./client";
 
 export interface HcBook {
     id: number;
+    slug: string | null;
     title: string;
     subtitle: string | null;
     description: string | null;
@@ -66,6 +67,7 @@ export interface HcList {
 
 const BOOK_FIELDS = /* GraphQL */ `
     id
+    slug
     title
     subtitle
     description

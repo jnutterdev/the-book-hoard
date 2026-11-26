@@ -71,6 +71,8 @@ export const externalIds = sqliteTable(
     entityId: text("entity_id").notNull(),
     source: text("source").$type<ExternalSource>().notNull(),
     externalId: text("external_id").notNull(),
+    /** Page for this record on the source site, when it has one. */
+    url: text("url"),
     ...timestamps,
   },
   (t) => [

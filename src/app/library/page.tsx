@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { books, libraryEntries, type ReadingStatus } from "@/db/schema";
 import { parseStatus, STATUS_INFO, STATUS_ORDER } from "@/lib/reading-status";
@@ -11,11 +11,21 @@ import { parseStatus, STATUS_INFO, STATUS_ORDER } from "@/lib/reading-status";
 export const metadata: Metadata = { title: "Library" };
 
 const visible = and(isNull(libraryEntries.deletedAt), isNull(libraryEntries.hiddenAt));
+const hiddenOnly = and(isNull(libraryEntries.deletedAt), isNotNull(libraryEntries.hiddenAt));
 
-function loadLibrary(status: ReadingStatus | null) {
+type Filter = { kind: "all" } | { kind: "status"; status: ReadingStatus } | { kind: "hidden" };
+
+function whereFor(filter: Filter) {
+    if (filter.kind === "hidden") return hiddenOnly;
+    if (filter.kind === "status") return and(visible, eq(libraryEntries.status, filter.status));
+    return visible;
+}
+
+function loadLibrary(filter: Filter) {
     return db
         .select({
             id: libraryEntries.id,
+            bookId: books.id,
             status: libraryEntries.status,
             rating: libraryEntries.rating,
             owned: libraryEntries.owned,
@@ -27,7 +37,7 @@ function loadLibrary(status: ReadingStatus | null) {
         })
         .from(libraryEntries)
         .innerJoin(books, eq(books.id, libraryEntries.bookId))
-        .where(status === null ? visible : and(visible, eq(libraryEntries.status, status)))
+        .where(whereFor(filter))
         .orderBy(desc(libraryEntries.addedAt), books.title)
         .all();
 }
@@ -42,17 +52,32 @@ function loadStatusCounts(): Map<ReadingStatus, number> {
     return new Map(rows.map((row) => [row.status, row.n]));
 }
 
-function StatusTabs({ active, counts }: { active: ReadingStatus | null; counts: Map<ReadingStatus, number> }) {
+function loadHiddenCount(): number {
+    return db.select({ n: count() }).from(libraryEntries).where(hiddenOnly).get()?.n ?? 0;
+}
+
+function StatusTabs({
+    active,
+    counts,
+    hiddenCount,
+}: {
+    active: Filter;
+    counts: Map<ReadingStatus, number>;
+    hiddenCount: number;
+}) {
     const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
     const tabs = [
-        { key: "all", href: "/library", label: "All", n: total, isActive: active === null },
+        { key: "all", href: "/library", label: "All", n: total, isActive: active.kind === "all" },
         ...STATUS_ORDER.filter((status) => counts.has(status)).map((status) => ({
             key: String(status),
             href: `/library?status=${status}`,
             label: STATUS_INFO[status].label,
             n: counts.get(status) ?? 0,
-            isActive: active === status,
+            isActive: active.kind === "status" && active.status === status,
         })),
+        ...(hiddenCount > 0
+            ? [{ key: "hidden", href: "/library?hidden=1", label: "Hidden", n: hiddenCount, isActive: active.kind === "hidden" }]
+            : []),
     ];
 
     return (
@@ -88,10 +113,13 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
     await connection();
     const params = await searchParams;
     const status = parseStatus(typeof params.status === "string" ? params.status : undefined);
+    const filter: Filter =
+        params.hidden === "1" ? { kind: "hidden" } : status !== null ? { kind: "status", status } : { kind: "all" };
     const counts = loadStatusCounts();
-    const rows = loadLibrary(status);
+    const hiddenCount = loadHiddenCount();
+    const rows = loadLibrary(filter);
 
-    if (counts.size === 0) {
+    if (counts.size === 0 && hiddenCount === 0) {
         return (
             <div className="flex flex-col items-center gap-4 rounded-2xl border border-brand-line bg-brand-surface p-10 text-center">
                 <Image
@@ -109,7 +137,7 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
 
     return (
         <div className="flex flex-col gap-4">
-            <StatusTabs active={status} counts={counts} />
+            <StatusTabs active={filter} counts={counts} hiddenCount={hiddenCount} />
             <div className="overflow-hidden rounded-2xl border border-brand-line">
                 <table className="w-full table-fixed text-left text-sm">
                     <thead className="bg-brand-crust text-xs tracking-widest text-brand-muted uppercase">
@@ -125,7 +153,7 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                         {rows.map((row) => (
                             <tr key={row.id}>
                                 <td className="px-4 py-3">
-                                    <div className="flex items-center gap-3">
+                                    <Link href={`/books/${row.bookId}`} className="group flex items-center gap-3">
                                         {row.coverUrl ? (
                                             <Image
                                                 src={row.coverUrl}
@@ -138,12 +166,12 @@ async function LibraryTable({ searchParams }: { searchParams: Promise<Record<str
                                             <div className="h-15 w-10 shrink-0 rounded bg-brand-line" />
                                         )}
                                         <div className="min-w-0">
-                                            <p className="truncate font-bold">{row.title}</p>
+                                            <p className="truncate font-bold group-hover:text-brand-accent">{row.title}</p>
                                             <p className="truncate text-brand-muted">
                                                 {row.authors.join(", ") || "Unknown author"}
                                             </p>
                                         </div>
-                                    </div>
+                                    </Link>
                                 </td>
                                 <td className="px-4 py-3">
                                     <span

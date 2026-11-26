@@ -3,8 +3,8 @@ import "server-only";
 import { appendFile, mkdir, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { DAY_MS, localDate } from "@/lib/dates";
+import { LOG_DIR } from "@/lib/paths";
 
-const LOG_DIR = path.join(process.cwd(), "data", "logs");
 const RETENTION_DAYS = 14;
 const REDACTED_KEYS = new Set(["authorization", "token", "headers", "apikey", "api_key", "hardcover_api_key"]);
 
@@ -68,7 +68,7 @@ async function write(level: Level, message: string, context?: Context, error?: u
     }
 }
 
-/** Appends to `data/logs/YYYY-MM-DD.log`. Never throws, so logging can't break the caller. */
+/** Appends to `<data dir>/logs/YYYY-MM-DD.log`. Never throws, so logging can't break the caller. */
 export const log = {
     warn: (message: string, context?: Context, error?: unknown): Promise<void> =>
         write("warn", message, context, error),

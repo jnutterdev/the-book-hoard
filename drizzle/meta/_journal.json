@@ -15,6 +15,13 @@
       "when": 1795659250827,
       "tag": "0001_sync_logging",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795660881589,
+      "tag": "0002_external_urls",
+      "breakpoints": true
     }
   ]
 }

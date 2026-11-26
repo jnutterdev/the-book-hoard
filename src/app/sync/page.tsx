@@ -59,7 +59,7 @@ async function RunHistory() {
                                     {JSON.stringify(run.errorDetail, null, 2)}
                                 </pre>
                                 <p className="mt-2 text-brand-faint">
-                                    Full stack traces are in data/logs/ for that day.
+                                    Full stack traces are in ~/.local/share/the-book-hoard/logs/ for that day.
                                 </p>
                             </details>
                         ) : null}

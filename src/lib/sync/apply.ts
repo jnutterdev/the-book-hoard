@@ -17,8 +17,7 @@ import {
     type SyncedEntity,
 } from "@/db/schema";
 import type { HcBook, HcEdition, HcList, HcUserBook } from "@/lib/hardcover/library";
-
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+import { pendingEntityIds, pendingFields, type Tx } from "@/lib/outbox";
 
 const VALID_STATUSES = new Set<number>(Object.values(READING_STATUS));
 
@@ -40,10 +39,14 @@ export function findLinked(tx: Tx, entityType: SyncedEntity, externalId: number)
         .get()?.id;
 }
 
-function link(tx: Tx, entityType: SyncedEntity, entityId: string, externalId: number): void {
+function link(tx: Tx, entityType: SyncedEntity, entityId: string, externalId: number, url: string | null = null): void {
     tx.insert(externalIds)
-        .values({ source: "hardcover", entityType, entityId, externalId: String(externalId) })
+        .values({ source: "hardcover", entityType, entityId, externalId: String(externalId), url })
         .run();
+}
+
+function bookUrl(book: HcBook): string | null {
+    return book.slug ? `https://hardcover.app/books/${book.slug}` : null;
 }
 
 function snapshotHash(tx: Tx, entityType: SyncedEntity, entityId: string): string | undefined {
@@ -92,11 +95,21 @@ function upsertBook(tx: Tx, book: HcBook): string {
     const existing = findLinked(tx, "book", book.id);
     if (existing) {
         tx.update(books).set(values).where(eq(books.id, existing)).run();
+        tx.update(externalIds)
+            .set({ url: bookUrl(book) })
+            .where(
+                and(
+                    eq(externalIds.source, "hardcover"),
+                    eq(externalIds.entityType, "book"),
+                    eq(externalIds.externalId, String(book.id)),
+                ),
+            )
+            .run();
         return existing;
     }
     const id = crypto.randomUUID();
     tx.insert(books).values({ id, ...values }).run();
-    link(tx, "book", id, book.id);
+    link(tx, "book", id, book.id, bookUrl(book));
     return id;
 }
 
@@ -165,7 +178,12 @@ export function applyUserBook(tx: Tx, remote: HcUserBook): boolean {
 
     let entryId = existingId;
     if (entryId) {
-        tx.update(libraryEntries).set(values).where(eq(libraryEntries.id, entryId)).run();
+        // Pending edits win until milestone 4 can push them.
+        const pending = pendingFields(tx, "library_entry", entryId);
+        const kept = Object.fromEntries(
+            Object.entries(values).filter(([field]) => !pending.has(field)),
+        ) as Partial<typeof values>;
+        tx.update(libraryEntries).set(kept).where(eq(libraryEntries.id, entryId)).run();
     } else {
         entryId = crypto.randomUUID();
         tx.insert(libraryEntries).values({ id: entryId, ...values }).run();
@@ -247,7 +265,9 @@ export function applyList(tx: Tx, remote: HcList): ListApplyResult {
         link(tx, "list", listId, remote.id);
     }
 
-    const keptItemIds: string[] = [];
+    // Items with unsent local changes (adds or removals) are left exactly as they are.
+    const pendingItems = pendingEntityIds(tx, "list_item");
+    const keptItemIds: string[] = [...pendingItems];
     remote.list_books.forEach((listBook, index) => {
         const itemValues = {
             listId,
@@ -256,6 +276,7 @@ export function applyList(tx: Tx, remote: HcList): ListApplyResult {
             deletedAt: null,
         };
         let itemId = findLinked(tx, "list_item", listBook.id);
+        if (itemId && pendingItems.has(itemId)) return;
         if (itemId) {
             tx.update(listItems).set(itemValues).where(eq(listItems.id, itemId)).run();
         } else {
