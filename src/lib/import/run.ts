@@ -3,6 +3,7 @@ import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
+    books,
     importRows,
     imports,
     libraryEntries,
@@ -17,6 +18,7 @@ import { log } from "@/lib/log";
 import { enqueue } from "@/lib/outbox";
 import { findLinked, upsertBook, upsertEdition } from "@/lib/sync/apply";
 import { matchRows } from "./match";
+import { lookUpUnmatched } from "./rescue";
 import { getImportPreview, planRows, type DiffField } from "./plan";
 import { parseStoryGraphCsv } from "./storygraph";
 
@@ -61,6 +63,10 @@ export async function createStoryGraphImport(filename: string, csv: string): Pro
             }
             tx.update(imports).set({ status: "review", matched, unmatched }).where(eq(imports.id, importId)).run();
         });
+        // Rows Hardcover couldn't place: see what Open Library knows (read-only lookups).
+        await lookUpUnmatched(
+            [...matches].filter(([, match]) => match.matchStatus === "needs_review").map(([rowId]) => rowId),
+        );
     } catch (error) {
         db.update(imports).set({ status: "failed" }).where(eq(imports.id, importId)).run();
         void log.error("StoryGraph import failed while matching", { importId }, error);
@@ -229,7 +235,8 @@ export async function commitImport(importId: string): Promise<CommitSummary> {
                         addedAt: localDate(new Date()),
                     })
                     .run();
-                enqueue(tx, "library_entry", id, "create");
+                const localOnly = tx.select({ localOnly: books.localOnly }).from(books).where(eq(books.id, bookId)).get();
+                if (!localOnly?.localOnly) enqueue(tx, "library_entry", id, "create");
                 entry = tx.select().from(libraryEntries).where(eq(libraryEntries.id, id)).get();
                 summary.addedToLibrary++;
             }

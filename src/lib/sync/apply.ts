@@ -273,9 +273,17 @@ export function applyList(tx: Tx, remote: HcList): ListApplyResult {
         link(tx, "list", listId, remote.id);
     }
 
-    // Items with unsent local changes (adds or removals) are left exactly as they are.
+    // Items with unsent local changes (adds or removals) are left exactly as they are,
+    // and so are books that live here only, which Hardcover will never list.
     const pendingItems = pendingEntityIds(tx, "list_item");
-    const keptItemIds: string[] = [...pendingItems];
+    const localOnlyItems = tx
+        .select({ id: listItems.id })
+        .from(listItems)
+        .innerJoin(books, eq(books.id, listItems.bookId))
+        .where(and(eq(listItems.listId, listId), eq(books.localOnly, true)))
+        .all()
+        .map((item) => item.id);
+    const keptItemIds: string[] = [...pendingItems, ...localOnlyItems];
     remote.list_books.forEach((listBook, index) => {
         const itemValues = {
             listId,

@@ -13,6 +13,7 @@ import {
     ReviewTools,
     SidePicker,
 } from "@/components/import/ImportActions";
+import { OpenLibraryPanel } from "@/components/import/OpenLibraryPanel";
 import { getImportPreview, type FieldDiff, type RowPlan } from "@/lib/import/plan";
 import { STATUS_INFO } from "@/lib/reading-status";
 
@@ -87,6 +88,7 @@ function MatchedBook({ plan, detail, editable }: { plan: RowPlan; detail?: React
                     <span className="font-bold">{plan.parsed.title}</span>
                 )}
                 <p className="text-xs text-brand-muted">{rowLine(plan.parsed)}</p>
+                {!match && plan.bookId ? <p className="text-xs text-brand-soft">Kept here only</p> : null}
                 {renamed ? (
                     <p className="text-xs text-brand-soft">
                         Hardcover: {match.title}
@@ -169,7 +171,7 @@ async function ImportReview({ params }: { params: Promise<{ id: string }> }) {
             {preview.needsReview.length > 0 ? (
                 <Section
                     title={`Needs a match (${preview.needsReview.length})`}
-                    hint="No confident match on Hardcover. Pick the right book, search again, or skip it."
+                    hint="No confident match on Hardcover. Pick the right book, search again (titles or ISBNs), add it to Hardcover from Open Library's details, or skip it."
                 >
                     <Rows>
                         {preview.needsReview.map((row) => (
@@ -189,6 +191,7 @@ async function ImportReview({ params }: { params: Promise<{ id: string }> }) {
                                         ))}
                                     </ul>
                                 ) : null}
+                                <OpenLibraryPanel rowId={row.rowId} state={row.openLibrary} />
                                 <ReviewTools
                                     rowId={row.rowId}
                                     defaultQuery={[row.parsed.title, row.parsed.authors[0]].filter(Boolean).join(" ")}

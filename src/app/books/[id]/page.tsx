@@ -158,7 +158,11 @@ async function BookDetail({ params }: { params: Promise<{ id: string }> }) {
                         </p>
                     )}
 
-                    {unsynced ? (
+                    {book.localOnly ? (
+                        <p className="self-start rounded-full bg-brand-line px-3 py-1 text-xs font-bold text-brand-soft">
+                            Here only · Hardcover doesn&rsquo;t have this book
+                        </p>
+                    ) : unsynced ? (
                         <p className="self-start rounded-full bg-status-reading/15 px-3 py-1 text-xs font-bold text-status-reading">
                             Saved here · not on Hardcover yet
                         </p>

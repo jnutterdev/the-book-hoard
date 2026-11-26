@@ -1,6 +1,7 @@
 import "server-only";
 
 import { HardcoverError, hardcoverRequest } from "./client";
+import { BOOK_FIELDS, type HcBook } from "./library";
 
 /** Fields of `UserBookUpdateInput` this app writes. Hardcover has no `owned` here; ownership is the Owned list. */
 export interface UserBookChanges {
@@ -95,4 +96,69 @@ export async function insertUserBook(object: NewUserBook): Promise<number> {
         throw new HardcoverError("graphql", result?.error ?? "Hardcover didn't return the new library entry");
     }
     return result.id;
+}
+
+const INSERT_BOOK = /* GraphQL */ `
+    mutation InsertBook($edition: EditionInput!) {
+        insert_book(edition: $edition) {
+            id
+            created
+            matched_by
+            errors
+            throttled
+            edition {
+                id
+                book { ${BOOK_FIELDS} }
+            }
+        }
+    }
+`;
+
+/** Fields of Hardcover's `BookDtoInput` this app sends. */
+export interface NewBookDto {
+    title: string;
+    subtitle?: string;
+    isbn_13?: string;
+    isbn_10?: string;
+    page_count?: number;
+    release_date?: string;
+    edition_format?: string;
+    publisher_id?: number;
+    contributions: { author_id: number }[];
+}
+
+export interface InsertedBook {
+    editionId: number;
+    book: HcBook;
+    created: boolean;
+    matchedBy: string | null;
+}
+
+/**
+ * Creates a book in Hardcover's shared catalog (or gets back the existing one
+ * Hardcover matches it to). This is public: call it for one book at a time,
+ * only when the person asks.
+ */
+export async function insertBook(dto: NewBookDto): Promise<InsertedBook> {
+    const data = await hardcoverRequest<{
+        insert_book: {
+            id: number | null;
+            created: boolean | null;
+            matched_by: string | null;
+            errors: string[] | null;
+            throttled: boolean | null;
+            edition: { id: number; book: HcBook } | null;
+        } | null;
+    }>(INSERT_BOOK, { edition: { dto } });
+    const result = data.insert_book;
+    if (result?.throttled) throw new HardcoverError("rate_limited", "Hardcover is limiting new books right now");
+    if (!result || (result.errors && result.errors.length > 0) || !result.edition) {
+        throw new HardcoverError("graphql", result?.errors?.join("; ") || "Hardcover didn't return the new book");
+    }
+    return {
+        editionId: result.edition.id,
+        book: result.edition.book,
+        created: result.created === true,
+        matchedBy: result.matched_by,
+    };
 }

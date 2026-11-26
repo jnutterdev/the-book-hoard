@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appMeta, libraryEntries, listItems, lists, OWNED_LIST_SLUG } from "@/db/schema";
+import { appMeta, books, libraryEntries, listItems, lists, OWNED_LIST_SLUG } from "@/db/schema";
 import { log } from "@/lib/log";
 import { enqueue, type Tx } from "@/lib/outbox";
 
@@ -35,23 +35,28 @@ export function setListMembership(
         .orderBy(desc(listItems.updatedAt))
         .all();
     const active = existing.find((item) => item.deletedAt === null);
+    // Books kept here only never go to Hardcover, so there's nothing to queue.
+    const localOnly = tx.select({ localOnly: books.localOnly }).from(books).where(eq(books.id, bookId)).get()?.localOnly ?? false;
+    const queue = (itemId: string, op: "create" | "delete") => {
+        if (!localOnly) enqueue(tx, "list_item", itemId, op);
+    };
 
     if (onList && !active) {
         const position = nextPosition(tx, listId);
         const revived = existing[0];
         if (revived) {
             tx.update(listItems).set({ deletedAt: null, position, editionId }).where(eq(listItems.id, revived.id)).run();
-            enqueue(tx, "list_item", revived.id, "create");
+            queue(revived.id, "create");
         } else {
             const id = crypto.randomUUID();
             tx.insert(listItems).values({ id, listId, bookId, position, editionId }).run();
-            enqueue(tx, "list_item", id, "create");
+            queue(id, "create");
         }
     }
 
     if (!onList && active) {
         tx.update(listItems).set({ deletedAt: new Date().toISOString() }).where(eq(listItems.id, active.id)).run();
-        enqueue(tx, "list_item", active.id, "delete");
+        queue(active.id, "delete");
     }
 }
 

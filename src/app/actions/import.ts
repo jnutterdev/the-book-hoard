@@ -1,9 +1,20 @@
 "use server";
 
 import { refresh } from "next/cache";
-import type { ImportChoice } from "@/db/schema";
+import type { BookDetailField, ImportChoice } from "@/db/schema";
 import { HardcoverError } from "@/lib/hardcover/client";
 import type { DiffField } from "@/lib/import/plan";
+import {
+    acceptAllFields,
+    acceptField,
+    addToHardcover,
+    DETAIL_FIELDS,
+    keepHereOnly,
+    lookUpOpenLibrary,
+    prepareForHardcover,
+    skipOpenLibrary,
+} from "@/lib/import/rescue";
+import { OpenLibraryError } from "@/lib/openlibrary/client";
 import {
     commitImport,
     createStoryGraphImport,
@@ -27,6 +38,7 @@ function message(error: unknown): string {
         if (error.kind === "network") return "Couldn't reach Hardcover.";
         if (error.kind === "unauthorized" || error.kind === "missing_token") return "Hardcover rejected the API key.";
     }
+    if (error instanceof OpenLibraryError) return error.message;
     return error instanceof Error ? error.message : "Something went wrong";
 }
 
@@ -96,4 +108,46 @@ export async function commitStoryGraphImport(
     } catch (error) {
         return { ok: false, error: message(error) };
     }
+}
+
+export async function lookUpOnOpenLibrary(rowId: string): Promise<ImportActionResult> {
+    return attempt(() => lookUpOpenLibrary(rowId));
+}
+
+export async function applyOpenLibraryField(rowId: string, field: BookDetailField): Promise<ImportActionResult> {
+    if (!DETAIL_FIELDS.includes(field)) return { ok: false, error: "Unknown field" };
+    return attempt(() => acceptField(rowId, field));
+}
+
+export async function applyAllOpenLibraryFields(rowId: string): Promise<ImportActionResult> {
+    return attempt(() => acceptAllFields(rowId));
+}
+
+export async function skipOpenLibraryResult(rowId: string): Promise<ImportActionResult> {
+    return attempt(() => skipOpenLibrary(rowId));
+}
+
+/** Finds the Hardcover authors and publisher a book would go up with. Read-only. */
+export async function checkWithHardcover(rowId: string): Promise<ImportActionResult> {
+    return attempt(async () => {
+        await prepareForHardcover(rowId);
+    });
+}
+
+/** Creates one book in Hardcover's public catalog. Only ever called from its own confirm click. */
+export async function addBookToHardcover(
+    rowId: string,
+): Promise<{ ok: true; created: boolean; title: string } | { ok: false; error: string }> {
+    try {
+        const result = await addToHardcover(rowId);
+        refresh();
+        return { ok: true, ...result };
+    } catch (error) {
+        return { ok: false, error: message(error) };
+    }
+}
+
+/** Makes the book in this app only. Nothing goes to Hardcover. */
+export async function keepBookHereOnly(rowId: string): Promise<ImportActionResult> {
+    return attempt(() => keepHereOnly(rowId));
 }

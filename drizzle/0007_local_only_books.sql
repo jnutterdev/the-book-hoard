@@ -1,0 +1,1 @@
+ALTER TABLE `books` ADD `local_only` integer DEFAULT false NOT NULL;

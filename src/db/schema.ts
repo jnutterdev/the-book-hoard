@@ -43,6 +43,8 @@ export const books = sqliteTable("books", {
   coverUrl: text("cover_url"),
   pageCount: integer("page_count"),
   firstPublished: text("first_published"),
+  /** Lives in this app only: Hardcover doesn't have it, so sync never sends or removes it. */
+  localOnly: integer("local_only", { mode: "boolean" }).notNull().default(false),
   ...timestamps,
 });
 
@@ -262,7 +264,7 @@ export const syncRuns = sqliteTable(
 export type ImportSource = "goodreads" | "storygraph";
 export type ImportStatus = "parsing" | "review" | "committed" | "failed";
 export type ImportMatchStatus = "matched" | "needs_review" | "skipped";
-export type ImportMatchSource = "local" | "isbn" | "search" | "manual";
+export type ImportMatchSource = "local" | "isbn" | "search" | "manual" | "created" | "kept";
 
 /** One CSV row, cleaned up. Source-neutral so Goodreads can reuse it. */
 export interface ParsedImportRow {
@@ -290,6 +292,31 @@ export interface ImportCandidate {
   year: number | null;
   imageUrl: string | null;
   readers: number;
+}
+
+/** A book's details from any source, for filling gaps and creating it on Hardcover. */
+export interface BookDetails {
+  title: string | null;
+  subtitle: string | null;
+  authors: string[];
+  publisher: string | null;
+  /** "1961" or "1961-04-01". */
+  publishDate: string | null;
+  pages: number | null;
+  isbn13: string | null;
+  isbn10: string | null;
+  /** Shown here only; Hardcover needs an uploaded image id, so covers don't go up yet. */
+  coverUrl: string | null;
+}
+
+export type BookDetailField = keyof BookDetails;
+export type OpenLibraryStatus = "found" | "not_found" | "skipped";
+
+/** Hardcover records a draft will be sent with, resolved before the "Add to Hardcover" click. */
+export interface HardcoverPrep {
+  authors: { name: string; id: number | null; hcName: string | null; books: number }[];
+  publisher: { id: number; name: string } | null;
+  preparedAt: string;
 }
 
 /** Per-field pick when the import and the library disagree. */
@@ -325,6 +352,12 @@ export const importRows = sqliteTable(
     /** Why a row was skipped, in plain words. */
     note: text("note"),
     committedAt: text("committed_at"),
+    /** What Open Library has for this row, when Hardcover didn't. */
+    openLibrary: text("open_library", { mode: "json" }).$type<BookDetails>(),
+    openLibraryStatus: text("open_library_status").$type<OpenLibraryStatus>(),
+    /** The details that would go to Hardcover: the row's own, plus Open Library fields you accepted. */
+    draft: text("draft", { mode: "json" }).$type<BookDetails>(),
+    hardcoverPrep: text("hardcover_prep", { mode: "json" }).$type<HardcoverPrep>(),
     ...timestamps,
   },
   (t) => [index("import_rows_import_idx").on(t.importId)],
@@ -335,5 +368,14 @@ export const appMeta = sqliteTable("app_meta", {
   id: id(),
   key: text("key").notNull().unique(),
   value: text("value"),
+  ...timestamps,
+});
+
+/** Responses from Open Library, so repeat lookups don't hit their servers again. */
+export const openLibraryCache = sqliteTable("open_library_cache", {
+  id: id(),
+  key: text("key").notNull().unique(),
+  payload: text("payload", { mode: "json" }).$type<unknown>(),
+  fetchedAt: text("fetched_at").notNull(),
   ...timestamps,
 });

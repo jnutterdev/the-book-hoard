@@ -4,6 +4,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
     appMeta,
+    books,
     externalIds,
     libraryEntries,
     listItems,
@@ -108,6 +109,18 @@ export function remoteValue(payload: HcUserBook, field: PushableField): unknown 
     const source = payload as unknown as Record<string, unknown>;
     // The pull reads review text as `review_raw`.
     return key === "review_markdown" ? source.review_raw : source[key];
+}
+
+/** True when the row is about a book that lives in this app only. */
+function isLocalOnly(row: OutboxRow): boolean {
+    let bookId: string | undefined;
+    if (row.entityType === "library_entry") {
+        bookId = db.select({ bookId: libraryEntries.bookId }).from(libraryEntries).where(eq(libraryEntries.id, row.entityId)).get()?.bookId;
+    } else if (row.entityType === "list_item") {
+        bookId = db.select({ bookId: listItems.bookId }).from(listItems).where(eq(listItems.id, row.entityId)).get()?.bookId;
+    }
+    if (!bookId) return false;
+    return db.select({ localOnly: books.localOnly }).from(books).where(eq(books.id, bookId)).get()?.localOnly ?? false;
 }
 
 function markSent(rowId: string): void {
@@ -330,6 +343,10 @@ export async function pushOutbox(): Promise<PushStats> {
     };
 
     for (const row of rows) {
+        if (isLocalOnly(row)) {
+            markSent(row.id); // kept here only: Hardcover never gets it
+            continue;
+        }
         try {
             let outcome: Outcome;
             if (row.entityType === "library_entry" && row.op === "update") outcome = await pushEntryUpdate(row, stats);

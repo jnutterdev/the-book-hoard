@@ -117,3 +117,51 @@ export async function fetchEditions(ids: number[]): Promise<HcEditionWithBook[]>
     }
     return found;
 }
+
+const SEARCH_TYPED_QUERY = /* GraphQL */ `
+    query SearchTyped($query: String!, $type: String!, $perPage: Int!) {
+        search(query: $query, query_type: $type, per_page: $perPage) { results }
+    }
+`;
+
+export interface HcAuthorHit {
+    id: number;
+    name: string;
+    alternateNames: string[];
+    books: number;
+}
+
+export interface HcPublisherHit {
+    id: number;
+    name: string;
+}
+
+interface TypedHit {
+    document: { id?: string | number; name?: string; alternate_names?: string[] | null; books_count?: number | null };
+}
+
+async function searchTyped(query: string, type: "Author" | "Publisher", perPage: number): Promise<TypedHit[]> {
+    const data = await hardcoverRequest<{ search: { results: { hits?: TypedHit[] } | null } }>(SEARCH_TYPED_QUERY, {
+        query,
+        type,
+        perPage,
+    });
+    return data.search.results?.hits ?? [];
+}
+
+export async function searchAuthors(name: string): Promise<HcAuthorHit[]> {
+    return (await searchTyped(name, "Author", 8))
+        .map(({ document }) => ({
+            id: Number(document.id),
+            name: document.name ?? "",
+            alternateNames: document.alternate_names ?? [],
+            books: document.books_count ?? 0,
+        }))
+        .filter((hit) => Number.isFinite(hit.id) && hit.name);
+}
+
+export async function searchPublishers(name: string): Promise<HcPublisherHit[]> {
+    return (await searchTyped(name, "Publisher", 5))
+        .map(({ document }) => ({ id: Number(document.id), name: document.name ?? "" }))
+        .filter((hit) => Number.isFinite(hit.id) && hit.name);
+}

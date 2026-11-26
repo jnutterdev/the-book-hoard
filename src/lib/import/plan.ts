@@ -7,12 +7,16 @@ import {
     imports,
     libraryEntries,
     reads,
+    type BookDetailField,
+    type BookDetails,
+    type HardcoverPrep,
     type ImportCandidate,
     type ImportChoice,
     type ParsedImportRow,
     type ReadingStatus,
 } from "@/db/schema";
 import { ownedBookIds } from "@/lib/list-membership";
+import { draftFromRow, offeredFields } from "./rescue";
 
 export type DiffField = "status" | "rating";
 
@@ -41,6 +45,13 @@ export interface ReviewRow {
     parsed: ParsedImportRow;
     candidates: ImportCandidate[];
     note: string | null;
+    openLibrary: {
+        status: "found" | "not_found" | "skipped" | null;
+        found: BookDetails | null;
+        draft: BookDetails;
+        offered: BookDetailField[];
+        prep: HardcoverPrep | null;
+    };
 }
 
 export interface SkippedRow {
@@ -175,12 +186,23 @@ export function getImportPreview(importId: string): ImportPreview | null {
     const plans = record.status === "committed" ? [] : planRows(rows);
     const needsReview: ReviewRow[] = rows
         .filter((row) => row.matchStatus === "needs_review" && row.parsed)
-        .map((row) => ({
-            rowId: row.id,
-            parsed: row.parsed as ParsedImportRow,
-            candidates: row.candidates ?? [],
-            note: row.note,
-        }));
+        .map((row) => {
+            const parsed = row.parsed as ParsedImportRow;
+            const draft = row.draft ?? draftFromRow(parsed);
+            return {
+                rowId: row.id,
+                parsed,
+                candidates: row.candidates ?? [],
+                note: row.note,
+                openLibrary: {
+                    status: row.openLibraryStatus,
+                    found: row.openLibrary,
+                    draft,
+                    offered: row.openLibrary ? offeredFields(draft, row.openLibrary) : [],
+                    prep: row.hardcoverPrep,
+                },
+            };
+        });
     const skipped: SkippedRow[] = rows
         .filter((row) => row.matchStatus === "skipped")
         .map((row) => ({

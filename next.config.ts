@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   images: {
-    remotePatterns: [new URL("https://assets.hardcover.app/**")],
+    remotePatterns: [new URL("https://assets.hardcover.app/**"), new URL("https://covers.openlibrary.org/b/**")],
   },
   turbopack: {
     rules: {
